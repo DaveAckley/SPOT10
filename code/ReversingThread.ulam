@@ -1,0 +1,227 @@
+/** A Thread that reverses once goalAchieved */
+quark ReversingThread : ProgressiveThread {
+  typedef EventWindow.SiteNum SN;
+  //  constant String cMOORE_MINUS = "\x00\x01\x02\x04\x05\x07";  // 'No backsies' Moore nghb
+  constant String cMOORE_MINUS = "\x00\x01\x03\x04\x06\x08";  // 'No frontsies' Moore nghb
+  constant String cMOORE = "\x00\x01\x02\x03\x04\x05\x06\x07\x08";  // Moore nghb
+  constant String cMOORE_PLUS = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0a";  // Moore nghb+2 hops fwd
+  typedef Unsigned(3) Rot;
+  typedef Unary(2) Parent;
+  constant Parent cROOT = 0u;
+  constant Parent cLEFT = 1u;
+  constant Parent cRIGHT = 2u;
+
+  Rot mRot;
+  Once mOnce;
+  Parent mParent;
+
+  //// ReversingThread API
+  /** Get initial direction of this thread */
+  virtual Rot getForwardDirection() ;
+
+  /** True when it's time to reverse */
+  virtual Bool goalAchieved(Atom & ar) ;
+
+  /** True when output has been delivered/merged */
+  virtual Bool foldTo(SN destSN) ;
+  
+  MDist.Symmetry effectiveRot() { return currentStage() < cEXEUNT_OMNES ? mRot : (MDist.Symmetry) (mRot^0x4); }
+
+  SN relativeSN(SN fromHere, SN relativeMove) {
+    MDist mdist;
+    C2D base = mdist.getSiteCoord(fromHere);
+    C2D offset = mdist.getSiteCoord(relativeMove);
+    C2D rotOff = mdist.symMap(offset,effectiveRot());
+    return mdist.getSiteNumber(base+rotOff);
+  }
+
+  @Override
+  Bool grow(SN sn) { 
+    ByteStreamLogger log;
+    EventWindow ew;
+    ew[sn] = ew[0];
+    if (mParent == cROOT) {
+      Self & n  = (Self&) ew[sn];
+      MDist md;
+      C2D c = md.symMap(md.getSiteCoord(sn),effectiveRot());
+      C2D rightc = md.symMap(md.getSiteCoord(4u),effectiveRot());
+      n.mParent = ((c.x > 0)==(rightc.x > 0))? cLEFT : cRIGHT;
+    }
+    /*
+    if (mParent == cROOT) {
+      Self & n  = (Self&) ew[sn];
+      MDist md;
+      Rot frot = effectiveRot();
+      Rot ifrot = md.symInverse(frot);
+      C2D gsc = md.getSiteCoord(sn);
+      C2D c = md.symMap(gsc,frot);
+      C2D ic = md.symMap(gsc,ifrot);
+      C2D aheadc = md.symMap(md.getSiteCoord(2u),frot); 
+      C2D rightc = md.symMap(md.getSiteCoord(4u),frot); 
+      C2D leftc = md.symMap(md.getSiteCoord(1u),frot); 
+      if (c==rightc) n.mParent = cLEFT;
+      else if (c==leftc) n.mParent = cRIGHT;
+      else {
+        log.forceOutput(true);
+        n.mParent = cROOT;
+      }
+
+        log.printf("grow into sn %d mrot %d frot %d ac(%d,%d) rc(%d,%d) lc(%d,%d) gsc(%d,%d), c(%d,%d) ic(%d,%d)-> par %d\n",
+                   sn, mRot, frot,
+                   aheadc.x, aheadc.y,
+                   rightc.x, rightc.y,
+                   leftc.x, leftc.y,
+                   gsc.x, gsc.y,
+                   c.x,c.y,
+                   ic.x,ic.y,
+                   (Int) n.mParent
+                   );
+    }
+    */
+    return true;
+  }
+
+  SN findSelf(SN side) {
+    SN ret;
+    if (isProgram(ret = ahead(side))) return ret;
+    if (isProgram(ret = side)) return ret;
+    if (isProgram(ret = behind(side))) return ret;
+    return SN.maxof;
+  }
+
+  @Override
+  Bool isDone() {
+    ByteStreamLogger log;
+    if (currentStage() < cREPORT_OUT) return false;
+    EventWindow ew;
+    SN mySN = ew.getSiteNumber(self.atomof,0u); // XXX what symmetry really?
+    if (mySN == mySN.maxof) { Fail f; f.fail(); }
+    SN leftSelf = findSelf(left(mySN));
+    SN rightSelf = findSelf(right(mySN));
+    SN parent = SN.maxof;
+    SN offparent = SN.maxof;
+    if (mParent == cLEFT) { parent = leftSelf; offparent = rightSelf; }
+    else if (mParent == cRIGHT) { parent = rightSelf; offparent = leftSelf; }
+    else /* if (mParent == cROOT) */ {  // Wait for both sides to report
+      Bool ret = leftSelf == SN.maxof && rightSelf == SN.maxof;
+      if (ret) {
+        log.forceOutput(true);
+        //        log.printf("isDone ls %d, rs %d, mP %d\n", leftSelf, rightSelf, mParent);
+      }
+      return ret;
+    }
+    // Report when we're on the edge in our direction
+    if (parent != SN.maxof && offparent == SN.maxof) {
+      return foldTo(parent);
+    }
+    return false;
+  }
+
+  @Override
+  SN ahead(SN sn) { return relativeSN(sn, 2u); } // North in Northbound view
+  @Override
+  SN behind(SN sn) { return relativeSN(sn, 3u); } // South in Northbound view
+  @Override
+  SN left(SN sn) { return relativeSN(sn, 1u); } // West in Northbound view
+  @Override
+  SN right(SN sn) { return relativeSN(sn, 4u); } // East in Northbound view
+
+  @Override
+  SiteIterator theStage() {
+    return neighborhood();
+    //    return SiteIterator.instanceof(cMOORE_MINUS,effectiveRot());
+  }
+
+  @Override
+  SiteIterator neighborhood() {
+    return SiteIterator.instanceof(cMOORE_PLUS,effectiveRot());
+  }
+
+  Void behave() {
+    if (mOnce.new()) 
+      mRot = getForwardDirection();
+    update();
+  }
+  virtual Bool isProgram(SN sn) {
+    EventWindow ew;
+    Atom & a = ew[sn];
+    if (a as Self) {
+      MDist md;
+      C2D c = md.getSiteCoord(sn);
+      return mRot == a.mRot;
+      
+    }
+    return false;
+  }
+
+  virtual Bool isFree(SN sn) {
+    EventWindow ew;
+    return ew.isEmpty(sn);
+  }
+
+  virtual Bool process(SN sn) {
+    EventWindow ew;
+    Atom & a = ew[sn];
+    if (goalAchieved(a)) {
+      ByteStreamLogger log;
+      log.printf("goal! sn %d current %d omnes %d\n", sn, currentStage(), cEXEUNT_OMNES);
+      if (currentStage() < cEXEUNT_OMNES) {
+        advanceToStage(cEXEUNT_OMNES);
+        return false;
+      }
+    }
+    /* when reporting out the root cannot move, but that's still progress */
+    if (currentStage() == cREPORT_OUT && mParent == cROOT) {
+      declareProgress();
+      return false;
+    }
+    declareProgress();
+    return true;
+  }
+
+  virtual Bool fail() {
+    Fail f;
+    f.fail();
+    return true;
+  }
+
+
+  @Override
+  virtual ARGB getColor(Unsigned selector) {
+    ColorUtils cu;
+    if (currentStage() >= cREPORT_OUT) return cu.color(0xffbbbb22);
+    if (currentStage() >= cEXEUNT_OMNES) return cu.color(0xffbb2222);
+    return super.getColor(selector);
+  }
+
+  @Override
+  virtual Void renderGraphics() {
+    if (!mOnce.initted()) return;
+    Drawable drawable;
+    if (!drawable.canDraw()) return;
+
+    MDist md; // No ew when rendering!  Can't use ew.getCoordRaw()!
+    
+    C2D aheadc = md.symMap(md.getSiteCoord(2u),effectiveRot()); 
+    C2D rightc = md.symMap(md.getSiteCoord(4u),effectiveRot()); 
+    C2D start(0,0);
+    C2D endAhead = aheadc*(Drawable.cUNITS_PER_SITE/2); 
+    C2D endRight = (aheadc*2+rightc)*(Drawable.cUNITS_PER_SITE/8); 
+    ColorUtils cu;
+    ARGB oncol = cu.color((Unsigned) (0xff111111));
+    //202006201423      ARGB oncol2 = cu.color((Unsigned) (0xffdddd22));
+    ARGB oncol2 = cu.color((Unsigned) (0xffffffff));
+    drawable.drawMaskedLine(start,endAhead,oncol,oncol,(Bits) 0xffffffff,200u);
+    drawable.drawMaskedLine(endAhead,endRight,oncol,oncol,(Bits) 0xffffffff,200u);
+
+    SN parent = 0u;
+    if (mParent == cLEFT) parent = 1u;
+    else if (mParent == cRIGHT) parent = 4u;
+    C2D parentc = md.symMap(md.getSiteCoord(parent),effectiveRot()); 
+    //202006201423     C2D endParent = (parentc)*(Drawable.cUNITS_PER_SITE/4); 
+    C2D endParent = (parentc)*(Drawable.cUNITS_PER_SITE/3); 
+    drawable.drawMaskedLine(start,endParent,oncol2,oncol2,(Bits) 0xffffffff,400u);
+  }
+
+
+}

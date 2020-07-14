@@ -1,0 +1,123 @@
+quark SpatialThread : SPOT {  
+
+  //// SELF METHODS
+  virtual Bool rationalize() ; //< true if self-checks-or-repairs all succeeded
+  virtual Bool grow(SN sn) ;
+  virtual Bool isDone() ; //< true if this SPOT can now be erased
+  virtual Void conclude() ;
+  /*
+  virtual Void conclude() {    //< erase ew[sn] after any last words
+    EventWindow ew;
+    ByteStreamLogger log;
+    log.forceOutput(true);
+    log.printf("SpatialThread: CLAMS\n");
+    ew[0] = Empty.instanceof; // XXX DO OUTPUT/MERGE
+  }
+  */
+
+  //// SITE METHODS
+
+  /** true iff ew[sn] is part of the data; false for illegal SN.
+
+      By default, only lower-priority SpatialThreads are considered data.
+  */
+  virtual Bool isData(SN sn) {
+    EventWindow ew;
+    Atom& ar = ew[sn];
+    if (ar as Self) return ar.priority() < self.priority();
+    return false;
+  }
+
+  /** true iff ew[sn] is available for thread use; false for illegal SN  
+
+      By default, only live empty space is considered free
+  */
+  virtual Bool isFree(SN sn) { return EventWindow.instanceof.isEmpty(sn); }
+
+  /** true iff ew[sn] is an illegal SN or not to be altered by the thread 
+
+      By default, anything that isn't program, data, or free is considered context.
+  */
+  virtual Bool isContext(SN sn) {
+    return !EventWindow.instanceof.isLegal(sn) || (!isProgram(sn) && !isData(sn) && !isFree(sn));
+  }
+
+  //// PROCESS GEOMETRY METHODS
+  virtual SN ahead(SN sn) ; //< SN.maxof if none or sn is bad else next ahead 
+  virtual SN behind(SN sn) ; //< SN.maxof if none or sn is bad else next behind 
+  virtual SN left(SN sn) ; //< SN.maxof if none or sn is bad else next left relative to ahead 
+  virtual SN right(SN sn) ;  //< SN.maxof if none or sn is bad else next right relative to ahead 
+
+  //// COMPUTATION-LEVEL METHODS
+
+  /** Include ew[sn] in the computation now. return true iff ew[sn]
+      processing completed in a way saying thread should swap w/sn 
+   */
+  virtual Bool process(SN sn) ;
+  
+  //// THREAD-LEVEL METHODS
+
+  Bool checkSync(SN side, Bool okayGrow) {
+    ByteStreamLogger log;
+    log.printf("checkSync side %d ok %d behind(side) %d isProgram %d \n",side,okayGrow,behind(side),isProgram(behind(side)));
+    if (isProgram(behind(side))) return true; // Blocked by back man
+    if (isProgram(side)) return false; // Definitely not blocked on this side
+    if (okayGrow && isData(ahead(side)) && isFree(side)) {
+      EventWindow ew;
+      grow(side);
+    }
+    return false;
+  }
+
+  Bool isBlocked(Bool okayGrow) {
+    ByteStreamLogger log;
+    EventWindow ew;
+    SN mySN = ew.getSiteNumber(self.atomof, 0u);
+    Bool unblocked = !checkSync(left(mySN), okayGrow) && !checkSync(right(mySN), okayGrow); // Need to check both sides, for growth
+    log.printf("isBlocked in %d ok %d = %d\n",mySN,okayGrow,unblocked);
+    return !unblocked;
+  }
+
+  /** return true iff alterations have been made and caller should not trust local state */
+  virtual Bool update() {
+    ByteStreamLogger log(false);
+    EventWindow ew;
+
+    if (super.update()) return true;
+
+    log.printf("PHASE: SELF CHECK\n");
+    if (!rationalize()) return true; // irrational is always untrustworthy
+
+    SN fwd = ahead(0);
+
+    log.printf("PHASE: DYING AND MERGING\n");
+    if (isDone() || !ew.isLive(fwd)) {
+      conclude();
+      return true;
+    }
+
+    log.printf("PHASE: BLOCKING\n");
+    if (isProgram(behind(left(0u))) || isProgram(behind(right(0u))))
+      return false;
+
+    log.printf("PHASE: GROWTH AND BLOCKING\n");
+    if (isBlocked(true)) return false;
+
+    log.printf("PHASE: ADVANCE\n");
+    SN dmz = ahead(fwd);
+    if (!isContext(fwd) // OK to move what's in front of us
+        && !isProgram(left(dmz))   // And won't look like a back man to somebody ahead
+        && !isProgram(right(dmz))) {// On either side..
+      if (process(fwd)) {
+        // NEED TO FIX FOR STH.swap stuff
+        Atom tmp = ew[0];
+        ew[0] = ew[fwd];
+        ew[fwd] = tmp;
+        return true;
+      }
+    }
+
+    log.printf("PHASE: DONE\n");
+    return false;
+  }
+}

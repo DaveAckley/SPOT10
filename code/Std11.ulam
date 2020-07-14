@@ -1,0 +1,144 @@
+local constant String cMOORE = "\x00\x01\x02\x03\x04\x05\x06\x07\x08";
+/** \symbol T1 Thread reverses on seeing another threads
+ \color #3c3
+*/
+element Std11 : SpatialThread + SPOTStageBits(3) {
+  typedef XTimer(3u,7u,8) ProgressMeter;
+  typedef Unsigned(2) Rot;
+  Rot mRot;
+  Once mOnce;
+  ProgressMeter mProgress;
+  virtual Void conclude() { EventWindow ew; ew[0] = Empty.instanceof; }
+
+  MDist.Symmetry effectiveRot() { return currentStage() == 0u ? mRot : (MDist.Symmetry) (mRot|0x4); }
+
+  virtual Int priority() { return 11; }
+
+  virtual Bool reportOut(Atom & ar) { return false; }
+
+  virtual SiteIterator theStage() { return neighborhood(); }
+
+  @Override
+  Bool isDone() { return false; }
+
+  SN relativeSN(SN fromHere, SN relativeMove) {
+    MDist mdist;
+    C2D base = mdist.getSiteCoord(fromHere);
+    C2D offset = mdist.getSiteCoord(relativeMove);
+    C2D rotOff = mdist.symMap(offset,effectiveRot());
+    return mdist.getSiteNumber(base+rotOff);
+  }
+
+  @Override
+  Bool rationalize() {
+    if (mProgress.countAlarm()) {
+      mStage = mStage.maxof;
+    }
+    return true;
+  }
+
+  @Override
+  Bool grow(SN sn) { 
+    EventWindow ew;
+    ew[sn] = ew[0];
+    return true;
+  }
+
+  /*
+  @Override
+  Stage currentStage() { return mStage; }
+
+  @Override
+  Void advanceToStage(Stage newStage) {
+    if (newStage < mStage) { Fail f; f.fail("RETROGRADE STAGE"); }
+    mStage = newStage;
+  }
+  */
+
+  @Override
+  SN ahead(SN sn) { return relativeSN(sn, 2u); } // Northbound view
+  @Override
+  SN behind(SN sn) { return relativeSN(sn, 3u); } // Northbound view
+  @Override
+  SN left(SN sn) { return relativeSN(sn, 1u); } // Northbound view
+  @Override
+  SN right(SN sn) { return relativeSN(sn, 4u); } // Northbound view
+
+  @Override
+  SiteIterator neighborhood() { return SiteIterator.instanceof(cMOORE); }
+
+  Void behave() {
+    if (mOnce.new()) {
+      Random r;
+      mRot = (Rot) r.between(mRot.minof,mRot.maxof);
+    }
+    update();
+  }
+  virtual Bool isProgram(SN sn) {
+    EventWindow ew;
+    Atom & a = ew[sn];
+    if (a as Self) return mRot == a.mRot;
+    return false;
+  }
+  virtual Bool isData(SN sn) {
+    EventWindow ew;
+    return ew.isLive(sn) && !ew.isEmpty(sn) && !isProgram(sn);
+  }
+  virtual Bool isFree(SN sn) {
+    EventWindow ew;
+    return ew.isEmpty(sn);
+  }
+  //  virtual SiteIterator behind() {return SiteIterator.instanceof("\x06\x08"); }
+  //  virtual SiteIterator aligned() {return SiteIterator.instanceof("\x01\x04"); }
+  //  virtual SiteIterator ahead() {return SiteIterator.instanceof("\x05\x07"); }
+
+  virtual Bool process(SN sn) {
+    EventWindow ew;
+    Atom & a = ew[sn];
+    if (a is Ulam5StdlibControl && !(a is Self)) {
+      if (currentStage() < cEXEUNT_OMNES) {
+        advanceToStage(cEXEUNT_OMNES);
+        return false;
+      }
+    }
+    mProgress.reset();
+    return true;
+  }
+
+  virtual Bool fail() {
+    Fail f;
+    f.fail();
+    return true;
+  }
+
+
+  @Override
+  virtual ARGB getColor(Unsigned selector) {
+    ColorUtils cu;
+    if (currentStage() >= cEXEUNT_OMNES) return cu.color(0xffbb2222);
+    return cu.color(0xff22bb22);
+  }
+
+  @Override
+  virtual Void renderGraphics() {
+    if (!Ulam5StdlibControl.pRENDER_GRAPHICS || !mOnce.initted()) return;
+    Drawable drawable;
+    if (!drawable.canDraw()) return;
+
+    MDist md; // No ew when rendering!  Can't use ew.getCoordRaw()!
+    
+    C2D aheadc = md.symMap(md.getSiteCoord(2u),effectiveRot()); 
+    C2D rightc = md.symMap(md.getSiteCoord(4u),effectiveRot()); 
+    C2D start(0,0);
+    C2D endAhead = aheadc*(Drawable.cUNITS_PER_SITE/2); 
+    C2D endRight = rightc*(Drawable.cUNITS_PER_SITE/4); 
+    ColorUtils cu;
+    ARGB oncol = cu.color((Unsigned) (0xff3333ff));
+    ARGB oncol2 = cu.color((Unsigned) (0xffffff33));
+    drawable.drawMaskedLine(start,endAhead,oncol,oncol,(Bits) 0xffffffff,200u);
+    drawable.drawMaskedLine(start,endRight,oncol2,oncol2,(Bits) 0xffffffff,100u);
+
+  }
+
+
+}

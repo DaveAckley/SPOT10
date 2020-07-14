@@ -1,0 +1,103 @@
+local constant String cEWR4 =
+  "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28\x29";
+local constant String c4x4 =
+  "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c";
+local constant String cMOORE =
+  "\x00\x01\x02\x03\x04\x05\x06\x07\x08";
+
+quark QPhome(Int cPRIORITY) : SPOT + SPOTStageBits(2) {
+  virtual SiteIterator neighborhood() { return SiteIterator.instanceof(cMOORE); }
+  virtual SiteIterator theStage() { return neighborhood(); }
+  virtual Int priority() { return cPRIORITY; }
+  virtual Bool isProgram(EventWindow.SiteNum sn) {
+    ClassUtils cu;
+    EventWindow ew;
+    return cu.getClassId(ew[sn]) == cu.getClassId(self.atomof);
+  }
+  virtual Bool reportOut(Atom & ar) { return false; }
+
+  typedef Unsigned(2) Distance;
+  Distance mDistance;
+
+  virtual Bool update() {
+    ByteStreamLogger log;
+    log.printf("%s %s start\n",__CLASS__,__FUNC__);
+    if (super.update()) return true; // passivated, etc
+    log.printf("%s %s continue\n",__CLASS__,__FUNC__);
+    EventWindow ew;
+    Random r;
+    Unsigned mySupportedDist = Unsigned.maxof;
+    Unsigned minSelfDist = Unsigned.maxof;
+    Unsigned minThreadDist = Unsigned.maxof;
+    Unsigned minEmptyDist = Unsigned.maxof;
+    SN emptySN;
+    Unsigned emptyCount = 0;
+    Unsigned minDataDist = Unsigned.maxof;
+    SN dataSN;
+    Unsigned dataCount = 0;
+
+    // Init self to blown out too far
+    /*if (mDistance == 0)*/ mDistance = mDistance.maxof;
+
+    for (SiteIterator si = neighborhood(); si.hasNext();) {
+      SN sn = si.next();
+      if (sn == 0) continue;
+      Unsigned len = ew.getCoord(sn).length();
+      Atom & ar = ew[sn];
+      if (ar as Self) {
+        log.printf("as Self len %d ar.mD %d mSD %d\n",len,ar.mDistance,minSelfDist);
+        if (ar.mDistance+len < minSelfDist) minSelfDist = ar.mDistance+len;
+        log.printf("posSelf len %d ar.mD %d mSD %d\n",len,ar.mDistance,minSelfDist);
+      } else if (ar as DataSPOT) {
+        if (len < minDataDist) {
+          minDataDist = len;
+          dataSN = sn;
+          dataCount = 1;
+        } else if (len == minDataDist && r.oneIn(++dataCount)) {
+          dataSN = sn;
+        }
+      } else if (ar as SpatialThread) {
+        if (len < minThreadDist) minThreadDist = len;
+      } else if (ar is Empty) {
+        if (len < minEmptyDist) {
+          minEmptyDist = len;
+          emptySN = sn;
+          emptyCount = 1;
+        } else if (len == minEmptyDist && r.oneIn(++emptyCount))
+          emptySN = sn;
+      }
+    }
+
+    log.printf("mDD %d mSD %d mTD %d mED %d eSN %d mD %d\n",
+               minDataDist, minSelfDist, minThreadDist,
+               minEmptyDist, emptySN, mDistance);
+    Bool eraseMe = false;
+    if (minThreadDist < 2u) eraseMe = true;
+    if (minDataDist < mySupportedDist) mySupportedDist = minDataDist;
+    if (minSelfDist < mySupportedDist) mySupportedDist = minSelfDist;
+    if (eraseMe || mySupportedDist > mDistance.maxof) ew[0] = Empty.instanceof;
+    else {
+      mDistance = (Distance) mySupportedDist;
+      if (minDataDist < minDataDist.maxof && minEmptyDist < minEmptyDist.maxof) {
+        Unsigned d2e = ew.getCoord(emptySN).manhattanDistance(ew.getCoord(dataSN));
+        if (d2e <= Distance.maxof) {
+          Atom a = self.atomof;
+          Self& s = (Self&) a;
+          s.mDistance = mDistance.maxof;
+          ew[emptySN] = s.atomof;
+        }
+      }
+    }
+    
+    return true;
+  }
+}
+
+/** \symbol Ph
+    \color #9ae
+ */
+element Phome : QPhome(Int.minof/2) {
+  Void behave() {
+    update();
+  }
+}

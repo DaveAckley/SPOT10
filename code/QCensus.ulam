@@ -1,0 +1,428 @@
+
+/** Spatial thread reverses on seeing a particular target, counts number of non-empty sites encountered
+ \color #33c
+*/
+quark QCensus(Unsigned(5) bits,Unsigned baseClassId) : ReversingThread + SPOTStageBits(3) {
+  Unsigned(bits) mCount;
+  constant Unsigned cTAG_BITS = 10u;
+  typedef Unsigned(cTAG_BITS) TagType;
+  TagType mTag;
+
+  @Override
+  Bool isData(SN sn) {
+    EventWindow ew;
+    Atom& ar = ew[sn];
+    return super.isData(sn) || ar is DataSPOT || ar is Terminus ;
+  }
+
+  @Override
+  Bool isFree(SN sn) {
+    EventWindow ew;
+    Atom& ar = ew[sn];
+    return super.isFree(sn) || ar is Phome ;
+  }
+
+  @Override
+  Bool isContext(SN sn) {
+    EventWindow ew;
+    return super.isContext(sn) || ew[sn] is Border;
+  }
+
+  @Override
+  Void behave() {
+    if (mTag == 0) {
+      ClassUtils cu;
+      ByteStreamLogger log;
+      log.forceOutput(true);
+      Random r;
+      mTag = (TagType) (r.bits(cTAG_BITS)+1u); // Hits TagType.maxof twice so be it
+      log.printf("QCENSUSDATA: START %s %d\n",
+                 cu.getClassName(cu.getClassId(self),false,true),
+                 mTag);
+    }
+    return super.behave();
+  }
+
+
+  @Override
+  Bool grow(SN sn) { 
+    Bool ret = super.grow(sn);
+    if (!ret) return ret;
+    EventWindow ew;
+    Self & s = (Self&) ew[sn];  // It REALLY should be, right?
+    s.mCount = 0;               // New guys start with no count!
+    return true;
+  }
+
+  @Override
+  Void conclude() {
+    EventWindow ew;
+    ByteStreamLogger log;
+    ClassUtils cu;
+    if (mParent == cROOT) {
+      Bool delivered = false;
+      for (SiteIterator si = neighborhood(); si.hasNext();) {
+        SN sn = si.next();
+        Atom & aref = ew[sn];
+        if (aref as DStd12) {
+          aref.acceptDelivery(self.atomof, mTag, mCount);
+          delivered = true;
+          break;
+        }
+      }
+
+      if (!delivered) {
+        log.forceOutput(true);
+        log.printf("QCENSUSDATA: LOST %s %d %d\n",
+                   cu.getClassName(cu.getClassId(self),false,true),
+                   mTag,
+                   mCount);
+      }
+    }
+    ew[0] = Empty.instanceof; // XXX DO OUTPUT/MERGE
+  }
+
+  // QCensus API
+  virtual Bool counts(SN sn) {
+    EventWindow ew;
+    ClassUtils cu;
+    return cu.isBase(cu.getClassId(ew[sn]),baseClassId);
+  }
+  
+  virtual Int priority() { return 12; }
+
+  @Override
+  virtual Bool process(SN sn) {
+    ByteStreamLogger log;
+    log.printf("%s %s\n",__CLASS__, __FUNC__);
+    Bool ret = super.process(sn);
+    if (!ret) return ret;
+    EventWindow ew;
+    if (currentStage() < cEXEUNT_OMNES && counts(sn)) ++mCount;
+    return true;
+  }
+
+  virtual Rot getForwardDirection() {
+    EventWindow ew;
+    for (SN sn = 1u; sn <= 4u; ++sn) {
+      Atom & a = ew[sn];
+      if (a as DStd12) {
+        //        if (a.mReleasing==a.cCLEAR_WAIT)
+        return a.getForwardDirection();
+      }
+    }
+    Random r;
+    return (Rot) r.between(0u,3u);//mRot.minof,mRot.maxof);
+  }
+
+  virtual Bool goalAchieved(Atom & a) {
+    return (a is Terminus && !(a is Self));
+  }
+
+  virtual Bool reportOut(Atom & a) {
+    return (a is Std12Control);
+  }
+
+  virtual Bool foldTo(SN destSN) {
+    EventWindow ew;
+    Atom & a = ew[destSN];
+    if (a as Self) {
+      a.mCount += mCount;
+      mCount = 0;
+      return true;
+    }
+    return false;
+  }
+
+}
+
+quark Std12Control : SPOT + SPOTStageBits(1)  { }
+
+/** \symbol Emitter/consumer of Std12 threads
+ \color #d22
+*/
+quark DStd12 : Std12Control {
+  typedef ReversingThread.Rot Rot;
+  typedef AtomUtils.Type AtomType;
+
+  virtual SN getReleaseSN();
+
+  virtual AtomType getThreadAtomType();
+
+  virtual Rot getForwardDirection() ;
+
+  virtual Bool isProgram(SN sn) {
+    return false;
+  }
+
+  virtual Bool reportOut(Atom & ar) { return false; }
+
+  @Override
+  SiteIterator neighborhood() {
+    return SiteIterator.instanceof(ReversingThread.cMOORE);
+  }
+
+  /*
+    sizedstage
+    0 : running
+    1 : abort
+  */
+
+  typedef Unary(2) ReleasingType;
+  constant ReleasingType cRELEASE_WAIT = 0u;
+  constant ReleasingType cCLEAR_WAIT = 1u;
+  constant ReleasingType cRETURN_WAIT = 2u;
+  ReleasingType mReleasing;
+
+  Void acceptDelivery(Atom & aref, Unsigned tag, Unsigned count) {
+    ByteStreamLogger log;
+    ClassUtils cu;
+    log.forceOutput(true);
+    log.printf("QCENSUSDATA: DELIVERED %s %d %d\n",
+               cu.getClassName(cu.getClassId(aref),false,true),
+               tag,
+               count);
+    if (mReleasing == cRETURN_WAIT)
+      mReleasing = cRELEASE_WAIT;
+  }
+
+  /** Need variable priority to release and recapture Std12s ?  But we're not calling update..*/
+  virtual Int priority() { return 11; }
+
+  Void behave() {
+    Random r;
+    if (mReleasing==cRELEASE_WAIT) {
+      if (r.oneIn(100)) {
+        EventWindow ew;
+        SN rsn = getReleaseSN();
+        AtomUtils au;
+        AtomType atomtype = getThreadAtomType();
+        if (ew[rsn] is Empty || ew[rsn] is Phome) {
+          ew[rsn] = au.new(atomtype);
+          mReleasing = cCLEAR_WAIT;
+        } else {
+          if (au.getType(ew[rsn]) == atomtype)
+            mReleasing = cRETURN_WAIT;  // Already there!?  Better collect it!
+        }
+      }
+    } else if (mReleasing==cCLEAR_WAIT) {
+      if (r.oneIn(100)) {
+        mReleasing = cRETURN_WAIT;
+      }
+    } else if (mReleasing==cRETURN_WAIT) {
+      if (r.oneIn(1000)) {
+        mReleasing = cRELEASE_WAIT;
+      }
+    }
+  }
+
+  ARGB getColor(Unsigned selector) {
+    ColorUtils cu;
+    if (mReleasing==cRELEASE_WAIT) return cu.color(0xff22bb22);
+    if (mReleasing==cCLEAR_WAIT) return cu.color(0xffbb2222);
+    if (mReleasing==cRETURN_WAIT) return cu.color(0xff2222bb);
+    return super.getColor(selector);
+  }
+}
+
+quark DataSPOT : SPOT + SPOTStageBits(1) {
+  virtual Int priority() {
+    ByteStreamLogger log;
+    //    log.printf("DPSOT prio %d\n",Int.minof/2);
+    return Int.minof/2;
+  }
+  virtual SiteIterator neighborhood() { return SiteIterator.instanceof("\x00\x01\x04"); }
+  virtual SiteIterator theStage() { return neighborhood(); }
+  virtual Bool isProgram(SN sn) { return false; }
+  virtual Bool reportOut(Atom& ar) { return false; }
+  virtual Void behave() {
+    if (update()) return; // Defer if need be
+    EventWindow ew;
+    ClassUtils cu;
+    Random r;
+    // Background assortation process
+    ByteStreamLogger log;
+    /*
+    log.printf("assort sym %d sn 1 isDS %d cidSelf %d cidew1 %d\n",
+               ew.getSymmetry(),
+               ew[1] is DataSPOT,
+               cu.getClassId(self),
+               cu.getClassId(ew[1]));
+    */
+    if (cu.getClassId(self) != cu.getClassId(ew[4]) &&    // If not next to my own kind
+        ew[1] is DataSPOT && // and neighbor on other side is also data
+        cu.getClassId(self) != cu.getClassId(ew[1]) &&    // and also not my exact kind
+        r.oneIn(4)) {          // and 25% shot
+      Atom tmp = ew[0];         // then let's swap
+      ew[0] = ew[1];
+      ew[1] = tmp;
+    }
+  }
+}
+
+/**
+   \symbol Te
+   \color #111
+ */ 
+element Terminus : DeadSPOT { }
+
+/**
+   \symbol D0
+   \color #333
+   \symmetries all
+ */ 
+element Data10 : DataSPOT { }
+
+/**
+   \symbol D1
+   \color #e22
+   \symmetries all
+ */ 
+element Data11 : DataSPOT { }
+/**
+   \symbol D2
+   \color #777
+   \symmetries all
+ */ 
+element Data12 : DataSPOT { }
+/**
+   \symbol D3
+   \color #999
+   \symmetries all
+ */ 
+element Data13 : DataSPOT { }
+
+/**
+   \symbol SD
+   \color #cc0
+ */ 
+element SeedData {
+  Void behave() {
+    Random r;
+    EventWindow ew;
+    Int n = r.between(0,8);
+    if (false) { }
+    else if (n < 3) ew[0] = Data10.instanceof;
+    else if (n < 5) ew[0] = Data11.instanceof;
+    else if (n < 7) ew[0] = Data12.instanceof;
+    else if (n < 9) ew[0] = Data13.instanceof;
+    else ew[0] = Empty.instanceof;
+  }
+}
+
+/** Count non-empties
+    \symbol NE
+    \color #5d5
+*/
+element NonEmpty : QCensus(10,UrSelf.classidof) {
+  Bool counts(SN sn) {
+    EventWindow ew;
+    return !(ew[sn] is Empty);
+  }
+}
+
+/**\symbol C0
+   \color #55e
+ */
+element CountType10 : QCensus(10,Data10.classidof) { }
+
+/**\symbol C1
+   \color #3e3
+ */
+element CountType11 : QCensus(10,Data11.classidof) { 
+  virtual Int priority() { return super.priority() + 1; }
+  @Override
+  Bool isData(SN sn) {
+    EventWindow ew;
+    Atom& ar = ew[sn];
+    return super.isData(sn) || ar is DataSPOT || ar is Terminus
+      || ar is CountType11 ; // XXX TO LET THEM MESS EACH OTHER UP
+  }
+
+}
+
+/** \symmetries none */
+element WBEmitter : DStd12 {
+
+  virtual SiteIterator theStage() { return neighborhood(); }
+
+  virtual AtomType getThreadAtomType() {
+    AtomUtils au;
+    Int type = au.getType(CountType10.instanceof);
+    if (type < 0) { Fail f; f.fail(); }
+    return (AtomType) type;
+  }
+
+  virtual Rot getForwardDirection() {
+    return 3u;
+  }
+
+  virtual SN getReleaseSN() {
+    return 1u;
+  }
+  
+}
+
+/** \symmetries none */
+element SBEmitter : DStd12 {
+
+  virtual SiteIterator theStage() { return neighborhood(); }
+
+  virtual AtomType getThreadAtomType() {
+    AtomUtils au;
+    Int type = au.getType(CountType11.instanceof);
+    if (type < 0) { Fail f; f.fail(); }
+    return (AtomType) type;
+  }
+
+  virtual Rot getForwardDirection() {
+    return 4u;
+  }
+
+  virtual SN getReleaseSN() {
+    return 3u;
+  }
+  
+}
+
+//local typedef EventWindow.SiteNum SN;
+local typedef Unsigned(6) SN;
+local typedef Unsigned(3) Rot;
+
+quark Dir11Releaser(Rot cROT, SN cSN) : DStd12 {
+  Unsigned(3) mCount;
+
+  virtual SiteIterator theStage() { return neighborhood(); }
+
+  virtual AtomType getThreadAtomType() {
+    AtomUtils au;
+    return (AtomType) au.getType(CountType11.instanceof);
+  }
+  virtual SN getReleaseSN() {
+    return cSN;
+  }
+
+  virtual Rot getForwardDirection() {
+    return cROT;
+  }
+  Void behave() {
+    EventWindow ew;
+    SN sn = getReleaseSN();
+    if (ew[sn] is Empty) {
+      if (mCount==0)
+        ew[sn] = CountType11.instanceof;
+    }
+    if (++mCount==mCount.maxof)
+      ew[0] = Empty.instanceof;
+  }
+}
+
+/** \symmetries none */
+element ESeed : Dir11Releaser(1u,4u) { }
+/** \symmetries none */
+element SSeed : Dir11Releaser(4u,3u) { }
+/** \symmetries none */
+element WSeed : Dir11Releaser(3u,1u) { }
+/** \symmetries none */
+element NSeed : Dir11Releaser(0u,2u) { }
+

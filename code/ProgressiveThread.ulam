@@ -1,0 +1,23 @@
+/** A Thread template with a configurable notion of progress
+    
+    \sa XTimer for the template parameters
+ */
+quark QProgressiveThread(Unary(5) cBITS, Unsigned cTRIGGER_LEVEL, Unsigned cK) : SpatialThread {
+  typedef XTimer(cBITS,cTRIGGER_LEVEL,cK) ProgressMeter;
+  ProgressMeter mProgress;
+
+  Void declareProgress() {
+    mProgress.reset();
+  }
+
+  @Override
+  Bool rationalize() {
+    if (mProgress.countAlarm()) 
+      advanceToStage(cEMERGENCY_ABORT);
+    return true;
+  }
+
+}
+
+/** A Thread with a default notion of progress */
+quark ProgressiveThread : QProgressiveThread(3u,7u,8) { }

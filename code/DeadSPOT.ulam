@@ -1,0 +1,11 @@
+quark QDeadSPOT(Int cPRIORITY) : SPOT {
+  virtual Unsigned currentStage() { return 0u; }
+  virtual SiteIterator neighborhood() { return SiteIterator.instanceof(""); }
+  virtual SiteIterator theStage() { return neighborhood(); }
+  virtual Int priority() { return cPRIORITY; }
+  virtual Bool isProgram(SN sn) { return false; }
+  virtual Bool reportOut(Atom& ar) { return false; }
+  virtual Void advanceToStage(Unsigned newStage) { }
+}
+
+quark DeadSPOT : QDeadSPOT(Int.minof/2) { }

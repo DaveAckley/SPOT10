@@ -1,0 +1,8 @@
+quark QBorderTag { } 
+
+quark QBorder(Int cPRIORITY) : QDeadSPOT(cPRIORITY) + QBorderTag { }
+
+/** \symbol B0
+    \color #444
+*/
+element Border : QBorder(0) { }
