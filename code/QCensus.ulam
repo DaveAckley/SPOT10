@@ -268,7 +268,7 @@ element Terminus : DeadSPOT { }
 
 /**
    \symbol D0
-   \color #333
+   \color #111
    \symmetries all
  */ 
 element Data10 : DataSPOT { }
@@ -359,6 +359,28 @@ element WBEmitter : DStd12 {
 
   virtual SN getReleaseSN() {
     return 1u;
+  }
+  
+}
+
+/** \symmetries none */
+element EBEmitter : DStd12 {
+
+  virtual SiteIterator theStage() { return neighborhood(); }
+
+  virtual AtomType getThreadAtomType() {
+    AtomUtils au;
+    Int type = au.getType(CountType10.instanceof);
+    if (type < 0) { Fail f; f.fail(); }
+    return (AtomType) type;
+  }
+
+  virtual Rot getForwardDirection() {
+    return 1u;
+  }
+
+  virtual SN getReleaseSN() {
+    return 4u;
   }
   
 }
