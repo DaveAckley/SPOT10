@@ -1,6 +1,27 @@
-{1}  -*- text -*- 
+{3}  -*- text -*- 
 [0:
 
 Tue Jul 14 15:22:00 2020 Time to release SPOT10!  Yow!
 
 :0]
+[1:
+
+Wed Jul 15 14:24:29 2020 OK, have a few hours before I have to go
+final on the lightning talk details.  Why can't we have a big hack
+inner-outer moving scheme to demo?  Full hack!
+
+ - Do we have a mid-priority wall element?  We want something to be
+   isContext for the inner thread and isData for the outer thread.
+
+
+
+:1]
+[2:
+
+Sat Jul 18 00:55:01 2020 Well, we got walking-while-chewing-gum
+working, and the lightning talk came out OK enough, and it's now up
+and doing OK-business-by-Dave-Ackley-Channel-standards on youtube.
+
+Committing the changes for the video!
+
+:2]
